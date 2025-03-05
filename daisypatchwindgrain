@@ -1,0 +1,66 @@
+import("stdfaust.lib");
+
+// Number of grains mapped to CV outputs (limit 4 for Daisy Patch)
+N = 4; // Number of grains mapped to separate CV outputs
+
+// **🎚️ CV Inputs for External Modulation**
+cv_in1 = hslider("CV In 1 (Wind Speed)", 0.05, 0.0, 0.3, 0.005); 
+cv_in2 = hslider("CV In 2 (Wind Variability)", 0.3, 0.0, 1.0, 0.05);
+cv_in3 = hslider("CV In 3 (Spring Constant)", 0.5, 0.1, 2.0, 0.1);
+cv_in4 = hslider("CV In 4 (Gravity Strength)", 0.02, 0.0, 0.1, 0.001);
+
+// **🎛️ Sand Grain Physics**
+grain_size_min = hslider("Physics/Min Grain Size", 0.2, 0.1, 0.5, 0.01);
+grain_size_max = hslider("Physics/Max Grain Size", 0.4, 0.1, 0.8, 0.01);
+mass_factor = hslider("Physics/Mass Factor", 10, 5, 50, 1); 
+
+// **🌪️ Dynamic Wind Model (Modulated by CV Inputs)**
+wind_noise = no.noise;
+wind_gusts = os.osc(0.1) * 0.5 + 0.5;
+wind_turbulence = fi.lowpass(2, 0.1, wind_noise) * cv_in2; // CV In 2 controls turbulence
+wind_dynamic = (cv_in1 + (wind_gusts * wind_turbulence)) * wind_noise; // CV In 1 controls wind speed
+wind_x = wind_dynamic * 0.5;
+wind_y = wind_dynamic * 0.5;
+
+// **Randomized Grain Properties**
+grain_size(i) = grain_size_min + (fi.lowpass(2, 0.2, no.noise) * (grain_size_max - grain_size_min));
+mass(i) = 1.0 / (grain_size(i) * mass_factor); 
+
+// Generate motion angles
+phi(i) = os.osc(0.1 + float(i) * 0.01) * 3.1415;  
+theta(i) = os.osc(0.05 + float(i) * 0.015) * 6.2831;
+
+// Compute grain position in 3D
+x(i) = grain_size(i) * sin(phi(i)) * cos(theta(i));
+y(i) = grain_size(i) * sin(phi(i)) * sin(theta(i));
+z(i) = grain_size(i) * cos(phi(i)) - cv_in4 * mass(i); // CV In 4 modulates gravity
+
+// Apply Dynamic Wind & Noise
+x_new(i) = x(i) * 0.98 + wind_x * mass(i) + fi.lowpass(2, 0.2, no.noise) * cv_in2;
+y_new(i) = y(i) * 0.98 + wind_y * mass(i) + fi.lowpass(2, 0.2, no.noise) * cv_in2;
+z_new(i) = z(i) * 0.98 + wind_dynamic * 0.5 * mass(i) + fi.lowpass(2, 0.2, no.noise) * cv_in2;
+
+// **🛑 Spring-Mass Collision Handling (Modulated by CV)**
+boundary = 0.9;
+spring_force(i) = -cv_in3 * (abs(x_new(i)) - boundary) * (abs(x_new(i)) > boundary); // CV In 3 controls spring tension
+
+// Velocity update with spring force
+vx(i) = (x_new(i) * 0.98) + (spring_force(i) / mass(i));
+vy(i) = (y_new(i) * 0.98) + (spring_force(i) / mass(i));
+vz(i) = (z_new(i) * 0.98) + (spring_force(i) / mass(i));
+
+x_final(i) = x_new(i) + vx(i);
+y_final(i) = y_new(i) + vy(i);
+z_final(i) = z_new(i) + vz(i);
+
+// **Convert to CV Range (-5V to +5V)**
+cv_scale = 5.0; // Scale factor for modular CV
+
+// Assign Each Grain to a CV Output
+cv_out1 = x_final(0) * cv_scale; // Grain 1 - X position
+cv_out2 = x_final(1) * cv_scale; // Grain 2 - X position
+cv_out3 = x_final(2) * cv_scale; // Grain 3 - X position
+cv_out4 = x_final(3) * cv_scale; // Grain 4 - X position
+
+// **Final CV Output**
+process = cv_out1, cv_out2, cv_out3, cv_out4;
