@@ -7,6 +7,7 @@ N = 10; // Number of sand grains
 grain_size_min = hslider("Physics/Min Grain Size", 0.2, 0.1, 0.5, 0.01);
 grain_size_max = hslider("Physics/Max Grain Size", 0.4, 0.1, 0.8, 0.01);
 mass_factor = hslider("Physics/Mass Factor", 10, 5, 50, 1); 
+spring_constant = hslider("Physics/Spring Constant", 0.5, 0.1, 2.0, 0.1); // Spring force k
 
 // **🎛️ Sliders: Wind & Motion (Horizontal)**
 wind_speed = hslider("Wind/Speed", 0.05, 0.0, 0.2, 0.005); 
@@ -15,16 +16,16 @@ wind_direction_y = hslider("Wind/Direction Y", 0.5, -1.0, 1.0, 0.05);
 random_motion = hslider("Wind/Random Motion", 0.02, 0.0, 0.1, 0.002);
 
 // **🎛️ Sliders: Sound Properties (Horizontal)**
-base_freq = hslider("Synthesis/Base Frequency", 300, 100, 1000, 10);
+base_freq = hslider("Synthesis/Base Frequency", 300, 100, 1000, 10);  // ✅ Added missing definition
 freq_range = hslider("Synthesis/Frequency Variation", 200, 0, 500, 10);
-amp_variation = hslider("Synthesis/Amplitude Variation", 0.3, 0.1, 0.5, 0.05);
+amp_variation = hslider("Synthesis/Amplitude Variation", 0.3, 0.1, 0.5, 0.05); // ✅ Added missing definition
 filter_base = hslider("Synthesis/Filter Base", 500, 100, 2000, 50);
 filter_range = hslider("Synthesis/Filter Range", 500, 100, 2000, 50);
 
 // **🎛️ Sliders: Energy Loss & Gravity (Horizontal)**
 gravity = hslider("Physics/Gravity", 0.02, 0.0, 0.1, 0.001);  
 damping = hslider("Physics/Damping", 0.98, 0.8, 1.0, 0.01);  
-collision_factor = hslider("Physics/Collision Factor", 0.8, 0.5, 1.0, 0.01); // Bounce strength
+collision_factor = hslider("Physics/Collision Factor", 0.8, 0.5, 1.0, 0.01); 
 
 // **Wind Model using Filtered Noise**
 wind = fi.lowpass(2, 0.2, no.noise) * wind_speed; 
@@ -42,18 +43,26 @@ x(i) = grain_size(i) * sin(phi(i)) * cos(theta(i));
 y(i) = grain_size(i) * sin(phi(i)) * sin(theta(i));
 z(i) = grain_size(i) * cos(phi(i)) - gravity * mass(i); 
 
-// Apply Wind & Noise (Including Wind Direction Control)
+// Apply Wind & Noise
 x_new(i) = x(i) * damping + wind * wind_direction_x * mass(i) + fi.lowpass(2, 0.2, no.noise) * random_motion;
 y_new(i) = y(i) * damping + wind * wind_direction_y * mass(i) + fi.lowpass(2, 0.2, no.noise) * random_motion;
 z_new(i) = z(i) * damping + wind * 0.5 * mass(i) + fi.lowpass(2, 0.2, no.noise) * random_motion;
 
-// **🛑 Simple Collision Handling**
+// **🛑 Spring-Mass Collision Handling**
 boundary = 0.9; // The max distance grains can travel
 
-// If grains go too far, bounce them back with a damping factor
-x_final(i) = x_new(i) * (1 - (abs(x_new(i)) > boundary) * (1 - collision_factor));
-y_final(i) = y_new(i) * (1 - (abs(y_new(i)) > boundary) * (1 - collision_factor));
-z_final(i) = z_new(i) * (1 - (abs(z_new(i)) > boundary) * (1 - collision_factor));
+// Spring force (Hooke’s Law)
+spring_force(i) = -spring_constant * (abs(x_new(i)) - boundary) * (abs(x_new(i)) > boundary);
+
+// Velocity update with spring force
+vx(i) = (x_new(i) * damping) + (spring_force(i) / mass(i));
+vy(i) = (y_new(i) * damping) + (spring_force(i) / mass(i));
+vz(i) = (z_new(i) * damping) + (spring_force(i) / mass(i));
+
+// Final positions with velocity updates
+x_final(i) = x_new(i) + vx(i);
+y_final(i) = y_new(i) + vy(i);
+z_final(i) = z_new(i) + vz(i);
 
 // **Spatialization: Convert X Position to Stereo Pan**
 pan(i) = (x_final(i) + 1) / 2;  // Converts X (-1 to 1) → Stereo pan (0 to 1)
@@ -77,3 +86,4 @@ mixR = sum(i, N, right(i)) / N;
 
 // **Final Stereo Output**
 process = mixL, mixR;
+
