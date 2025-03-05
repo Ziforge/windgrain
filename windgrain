@@ -3,87 +3,86 @@ import("stdfaust.lib");
 // Number of grains
 N = 10; // Number of sand grains
 
-// **🎛️ Sliders: Sand Grain Physics (Horizontal)**
-grain_size_min = hslider("Physics/Min Grain Size", 0.2, 0.1, 0.5, 0.01);
-grain_size_max = hslider("Physics/Max Grain Size", 0.4, 0.1, 0.8, 0.01);
-mass_factor = hslider("Physics/Mass Factor", 10, 5, 50, 1); 
-spring_constant = hslider("Physics/Spring Constant", 0.5, 0.1, 2.0, 0.1); // Spring force k
+// **🎚️ MIDI-Mapped Parameters via 16n Faderbank**
+grain_size_min = hslider("Physics/Min Grain Size [midi:ctrl 1]", 0.2, 0.1, 0.5, 0.01);
+grain_size_max = hslider("Physics/Max Grain Size [midi:ctrl 2]", 0.4, 0.1, 0.8, 0.01);
+mass_factor = hslider("Physics/Mass Factor [midi:ctrl 3]", 10, 5, 50, 1);
+spring_constant = hslider("Physics/Spring Constant [midi:ctrl 4]", 0.5, 0.1, 2.0, 0.1);
+gravity = hslider("Physics/Gravity [midi:ctrl 5]", 0.02, 0.0, 0.1, 0.001);
+damping = hslider("Physics/Damping [midi:ctrl 6]", 0.98, 0.8, 1.0, 0.01);
+collision_factor = hslider("Physics/Collision Factor [midi:ctrl 7]", 0.8, 0.5, 1.0, 0.01);
 
-// **🎛️ Sliders: Wind & Motion (Horizontal)**
-wind_speed = hslider("Wind/Speed", 0.05, 0.0, 0.2, 0.005); 
-wind_direction_x = hslider("Wind/Direction X", 0.5, -1.0, 1.0, 0.05);
-wind_direction_y = hslider("Wind/Direction Y", 0.5, -1.0, 1.0, 0.05);
-random_motion = hslider("Wind/Random Motion", 0.02, 0.0, 0.1, 0.002);
+// **🌪️ MIDI-Controlled Wind Parameters**
+wind_speed = hslider("Wind/Speed [midi:ctrl 8]", 0.05, 0.0, 0.2, 0.005);
+wind_direction_x = hslider("Wind/Direction X [midi:ctrl 9]", 0.5, -1.0, 1.0, 0.05);
+wind_direction_y = hslider("Wind/Direction Y [midi:ctrl 10]", 0.5, -1.0, 1.0, 0.05);
+random_motion = hslider("Wind/Random Motion [midi:ctrl 11]", 0.02, 0.0, 0.1, 0.002);
 
-// **🎛️ Sliders: Sound Properties (Horizontal)**
-base_freq = hslider("Synthesis/Base Frequency", 300, 100, 1000, 10);  // ✅ Added missing definition
-freq_range = hslider("Synthesis/Frequency Variation", 200, 0, 500, 10);
-amp_variation = hslider("Synthesis/Amplitude Variation", 0.3, 0.1, 0.5, 0.05); // ✅ Added missing definition
-filter_base = hslider("Synthesis/Filter Base", 500, 100, 2000, 50);
-filter_range = hslider("Synthesis/Filter Range", 500, 100, 2000, 50);
+// **🎛️ MIDI-Controlled Sound Properties**
+base_freq = hslider("Synthesis/Base Frequency [midi:ctrl 12]", 300, 100, 1000, 10);
+freq_range = hslider("Synthesis/Frequency Variation [midi:ctrl 13]", 200, 0, 500, 10);
+amp_variation = hslider("Synthesis/Amplitude Variation [midi:ctrl 14]", 0.3, 0.1, 0.5, 0.05);
+filter_base = hslider("Synthesis/Filter Base [midi:ctrl 15]", 500, 100, 2000, 50);
+filter_range = hslider("Synthesis/Filter Range [midi:ctrl 16]", 500, 100, 2000, 50);
 
-// **🎛️ Sliders: Energy Loss & Gravity (Horizontal)**
-gravity = hslider("Physics/Gravity", 0.02, 0.0, 0.1, 0.001);  
-damping = hslider("Physics/Damping", 0.98, 0.8, 1.0, 0.01);  
-collision_factor = hslider("Physics/Collision Factor", 0.8, 0.5, 1.0, 0.01); 
+// **🌬️ Wind Model using Filtered Noise**
+wind = fi.lowpass(2, 0.2, no.noise) * wind_speed;
 
-// **Wind Model using Filtered Noise**
-wind = fi.lowpass(2, 0.2, no.noise) * wind_speed; 
-
-// **Randomized Grain Properties**
+// **🎲 Randomized Grain Properties**
 grain_size(i) = grain_size_min + (fi.lowpass(2, 0.2, no.noise) * (grain_size_max - grain_size_min));
-mass(i) = 1.0 / (grain_size(i) * mass_factor); 
+mass(i) = 1.0 / (grain_size(i) * mass_factor);
 
 // Generate motion angles
-phi(i) = os.osc(0.1 + float(i) * 0.01) * 3.1415;  
+phi(i) = os.osc(0.1 + float(i) * 0.01) * 3.1415;
 theta(i) = os.osc(0.05 + float(i) * 0.015) * 6.2831;
 
 // Compute grain position in 3D
 x(i) = grain_size(i) * sin(phi(i)) * cos(theta(i));
 y(i) = grain_size(i) * sin(phi(i)) * sin(theta(i));
-z(i) = grain_size(i) * cos(phi(i)) - gravity * mass(i); 
+z(i) = grain_size(i) * cos(phi(i)) - gravity * mass(i);
 
-// Apply Wind & Noise
+// **🌪️ Apply Wind & Noise**
 x_new(i) = x(i) * damping + wind * wind_direction_x * mass(i) + fi.lowpass(2, 0.2, no.noise) * random_motion;
 y_new(i) = y(i) * damping + wind * wind_direction_y * mass(i) + fi.lowpass(2, 0.2, no.noise) * random_motion;
 z_new(i) = z(i) * damping + wind * 0.5 * mass(i) + fi.lowpass(2, 0.2, no.noise) * random_motion;
 
 // **🛑 Spring-Mass Collision Handling**
-boundary = 0.9; // The max distance grains can travel
-
-// Spring force (Hooke’s Law)
+boundary = 0.9;
 spring_force(i) = -spring_constant * (abs(x_new(i)) - boundary) * (abs(x_new(i)) > boundary);
 
-// Velocity update with spring force
+// **Velocity Update with Spring Force**
 vx(i) = (x_new(i) * damping) + (spring_force(i) / mass(i));
 vy(i) = (y_new(i) * damping) + (spring_force(i) / mass(i));
 vz(i) = (z_new(i) * damping) + (spring_force(i) / mass(i));
 
-// Final positions with velocity updates
 x_final(i) = x_new(i) + vx(i);
 y_final(i) = y_new(i) + vy(i);
 z_final(i) = z_new(i) + vz(i);
 
-// **Spatialization: Convert X Position to Stereo Pan**
-pan(i) = (x_final(i) + 1) / 2;  // Converts X (-1 to 1) → Stereo pan (0 to 1)
+// **🎚️ Spatialization: Convert X Position to Stereo Pan**
+pan(i) = (x_final(i) + 1) / 2;
 
-// **Map to Sound Parameters**
-freq(i) = base_freq + (x_final(i) * freq_range);  
-amp(i) = 0.2 + (y_final(i) * amp_variation);   
-cutoff(i) = filter_base + (z_final(i) * filter_range);  
+// **🔊 Map to Sound Parameters**
+freq(i) = base_freq + (x_final(i) * freq_range);
+amp(i) = 0.2 + (y_final(i) * amp_variation);
 
-// Generate Sound for Each Grain
+// ✅ **Fixing the `filter_base` Issue**
+cutoff_raw(i) = filter_base + (z_final(i) * filter_range);
+cutoff(i) = max(50, min(10000, cutoff_raw(i)));  // Clamp cutoff between 50Hz - 10kHz
+
+// **🎛️ Generate Sound for Each Grain**
 grain(i) = os.osc(freq(i)) * amp(i);
 filtered_grain(i) = fi.lowpass(1, cutoff(i), grain(i));
 
-// **Apply Panning (Stereo Balance)**
+// **🎛️ Apply Panning (Stereo Balance)**
 left(i) = filtered_grain(i) * (1 - pan(i));
 right(i) = filtered_grain(i) * pan(i);
 
-// **Mix grains together for stereo output**
+// **🎛️ Mix grains together for stereo output**
 mixL = sum(i, N, left(i)) / N;
 mixR = sum(i, N, right(i)) / N;
 
-// **Final Stereo Output**
+// **🎚️ Final Stereo Output**
 process = mixL, mixR;
+
 
