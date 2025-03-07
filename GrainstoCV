@@ -1,0 +1,92 @@
+import("stdfaust.lib");
+
+// 🎵 **Phrygian Scale Mapping (A Phrygian)**
+phrygian_scale(i, root) =
+    select2(i % 2, 
+        select2((i / 2) % 2, 
+            select2((i / 4) % 2, root, root + 1),  // Root, ♭2
+            select2((i / 4) % 2, root + 3, root + 5)   // ♭3, 4
+        ), 
+        select2((i / 2) % 2, 
+            select2((i / 4) % 2, root + 7, root + 8),  // 5, ♭6
+            select2((i / 4) % 2, root + 10, root + 12) // ♭7, Octave
+        )
+    );
+
+N = 10; // Number of grains
+channels = 10; // Number of DAC outputs
+
+// 🎚️ MIDI-Mapped Parameters via 16n Faderbank
+root_midi = hslider("Scale/Root Note [midi:ctrl 15]", 57, 24, 72, 1);
+grain_size_min = hslider("Physics/Min Grain Size [midi:ctrl 1]", 0.2, 0.1, 0.5, 0.01);
+grain_size_max = hslider("Physics/Max Grain Size [midi:ctrl 2]", 0.4, 0.1, 0.8, 0.01);
+mass_factor = hslider("Physics/Mass Factor [midi:ctrl 3]", 10, 5, 50, 1);
+spring_constant = hslider("Physics/Spring Constant [midi:ctrl 4]", 0.5, 0.1, 2.0, 0.1);
+gravity = hslider("Physics/Gravity [midi:ctrl 5]", 0.02, 0.0, 0.1, 0.001);
+damping = hslider("Physics/Damping [midi:ctrl 6]", 0.98, 0.8, 1.0, 0.01);
+collision_factor = hslider("Physics/Collision Factor [midi:ctrl 7]", 0.8, 0.5, 1.0, 0.01);
+
+// 🌪️ **Wind & Movement**
+wind_speed = hslider("Wind/Speed [midi:ctrl 8]", 0.05, 0.0, 0.2, 0.005);
+random_motion = hslider("Wind/Random Motion [midi:ctrl 9]", 0.02, 0.0, 0.1, 0.002);
+wind = fi.lowpass(2, 0.2, no.noise) * wind_speed;
+
+// 🎛️ **Sound Properties**
+amp_variation = hslider("Synthesis/Amplitude Variation [midi:ctrl 12]", 0.3, 0.1, 0.5, 0.05);
+filter_base = hslider("Synthesis/Filter Base [midi:ctrl 13]", 500, 100, 2000, 50);
+filter_range = hslider("Synthesis/Filter Range [midi:ctrl 14]", 500, 100, 2000, 50);
+
+// 🎲 **Randomized Grain Properties**
+grain_size(i) = grain_size_min + (no.noise * (grain_size_max - grain_size_min));
+mass(i) = 1.0 / (grain_size(i) * mass_factor);
+
+// 🎵 **Generate Motion Angles**
+phi(i) = os.osc(0.1 + float(i) * 0.01) * 3.1415;
+theta(i) = os.osc(0.05 + float(i) * 0.015) * 6.2831;
+
+// 🌌 **Compute Grain Position in 3D Space**
+x(i) = grain_size(i) * sin(phi(i)) * cos(theta(i));
+y(i) = grain_size(i) * sin(phi(i)) * sin(theta(i));
+z(i) = grain_size(i) * cos(phi(i)) - gravity * mass(i);
+
+// 🌪️ **Apply Wind & Noise**
+x_new(i) = x(i) * damping + wind * mass(i) + (no.noise * random_motion);
+y_new(i) = y(i) * damping + wind * mass(i) + (no.noise * random_motion);
+z_new(i) = z(i) * damping + wind * 0.5 * mass(i) + (no.noise * random_motion);
+
+// 🛑 **Spring-Mass Collision Handling**
+boundary = 0.9;
+spring_force(i) = -spring_constant * (abs(x_new(i)) - boundary) * (abs(x_new(i)) > boundary);
+
+// 🚀 **Velocity Update with Spring Force**
+vx(i) = (x_new(i) * damping) + (spring_force(i) / mass(i));
+vy(i) = (y_new(i) * damping) + (spring_force(i) / mass(i));
+vz(i) = (z_new(i) * damping) + (spring_force(i) / mass(i));
+
+x_final(i) = x_new(i) + vx(i);
+y_final(i) = y_new(i) + vy(i);
+z_final(i) = z_new(i) + vz(i);
+
+// 🎚️ **Spatialization & Output Routing**
+out_index(i) = i % channels; // Spread grains across 10 outputs
+
+// 🔊 **Map to Phrygian Scale Frequencies**
+phrygian_index(i) = int(abs(x_final(i) * 8)) % 8;
+quantized_midi(i) = phrygian_scale(phrygian_index(i), root_midi);
+freq(i) = ba.midikey2hz(quantized_midi(i));
+
+// 🎛️ **Amplitude per Grain**
+amp(i) = 0.2 + (y_final(i) * amp_variation);
+
+// 🎚️ **Filtering (Dynamic Per Grain)**
+cutoff_raw(i) = filter_base + (z_final(i) * filter_range);
+cutoff(i) = max(50, min(10000, cutoff_raw(i)));  // Clamp to 50Hz - 10kHz
+
+// 🎛️ **Generate Sound for Each Grain**
+grain(i) = os.osc(freq(i)) * amp(i);
+filtered_grain(i) = fi.lowpass(1, cutoff(i), grain(i));
+
+// 🔀 **Send Each Grain to a Separate DAC Output**
+// Route each grain to its own independent output
+process = grain(0), grain(1), grain(2), grain(3), grain(4),
+          grain(5), grain(6), grain(7);
